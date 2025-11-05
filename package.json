@@ -1,0 +1,42 @@
+{
+  "name": "wilson-jr-mcp-server",
+  "version": "1.0.0",
+  "description": "Wilson Jr freight coordination MCP server with 15 tools for managing shipments, quotes, emails, and chat",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "wilson-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "stdio": "tsx src/index.ts --stdio",
+    "watch": "tsc --watch"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "freight",
+    "logistics",
+    "shipment",
+    "wilson"
+  ],
+  "author": "IRL (International Road & Logistics)",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "@neondatabase/serverless": "^0.10.4",
+    "express": "^4.21.2",
+    "resend": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
