@@ -5,6 +5,7 @@
  * Deploys to Dedalus Labs with proper HTTP endpoints
  */
 
+import 'dotenv/config';
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -440,6 +441,23 @@ function startHttpTransport(): void {
 
 // Start server
 async function main() {
+  // Validate required environment variables
+  const requiredEnvVars = ['DATABASE_URL', 'RESEND_API_KEY'];
+  const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+  if (missingEnvVars.length > 0) {
+    console.error('❌ Missing required environment variables:');
+    missingEnvVars.forEach(varName => {
+      console.error(`   - ${varName}`);
+    });
+    console.error('\nPlease set these environment variables and try again.');
+    process.exit(1);
+  }
+
+  console.log('✅ Environment variables validated');
+  console.log(`   DATABASE_URL: ${process.env.DATABASE_URL?.substring(0, 30)}...`);
+  console.log(`   RESEND_API_KEY: ${process.env.RESEND_API_KEY?.substring(0, 10)}...`);
+
   const args = process.argv.slice(2);
 
   if (args.includes('--stdio')) {
