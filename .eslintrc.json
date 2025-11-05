@@ -4,13 +4,13 @@
     "es2022": true
   },
   "extends": [
-    "eslint:recommended"
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended"
   ],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
     "ecmaVersion": 2022,
-    "sourceType": "module",
-    "project": "./tsconfig.json"
+    "sourceType": "module"
   },
   "plugins": [
     "@typescript-eslint"
@@ -23,6 +23,7 @@
   "ignorePatterns": [
     "dist/",
     "node_modules/",
-    "*.js"
+    "*.js",
+    "*.d.ts"
   ]
 }
