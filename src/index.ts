@@ -7,12 +7,14 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import express from 'express';
-import { Request, Response } from 'express';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { randomUUID } from 'crypto';
 
 // Import tool functions
 import { createShipment } from './tools/create-shipment.js';
@@ -30,19 +32,6 @@ import { findOpenShipmentByCustomer } from './tools/find-open-shipment-by-custom
 import { sendEmail } from './tools/send-email.js';
 import { addChatMessage } from './tools/add-chat-message.js';
 import { getChatHistory } from './tools/get-chat-history.js';
-
-// Initialize MCP Server
-const server = new Server(
-  {
-    name: "wilson-jr-freight-tools",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
 
 // Define all tools with MCP SDK schema
 const tools = [
@@ -238,157 +227,228 @@ const tools = [
   },
 ];
 
-// List tools handler
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools };
-});
+// HTTP Transport Setup with proper MCP SDK
+const PORT = parseInt(process.env.PORT || '8080', 10);
+const sessions = new Map<string, { transport: StreamableHTTPServerTransport; server: Server }>();
 
-// Call tool handler
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+function createServerInstance(): Server {
+  const serverInstance = new Server(
+    {
+      name: "wilson-jr-freight-tools",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {
+        tools: {},
+      },
+    }
+  );
+
+  // List tools handler
+  serverInstance.setRequestHandler(ListToolsRequestSchema, async () => {
+    return { tools };
+  });
+
+  // Call tool handler
+  serverInstance.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+
+    try {
+      let result;
+
+      // Route to appropriate tool handler
+      switch (name) {
+        case "create_shipment":
+          result = await createShipment(args as any);
+          break;
+        case "get_shipment":
+          result = await getShipment((args as any).shipment_id);
+          break;
+        case "update_shipment":
+          result = await updateShipment(args as any);
+          break;
+        case "list_shipments":
+          result = await listShipments((args as any) || {});
+          break;
+        case "add_quote":
+          result = await addQuote(args as any);
+          break;
+        case "get_quotes":
+          result = await getQuotes((args as any).shipment_id);
+          break;
+        case "select_quote":
+          result = await selectQuote(args as any);
+          break;
+        case "add_email":
+          result = await addEmail(args as any);
+          break;
+        case "get_emails":
+          result = await getEmails(args as any);
+          break;
+        case "get_unprocessed_emails":
+          result = await getUnprocessedEmails((args as any) || {});
+          break;
+        case "mark_email_processed":
+          result = await markEmailProcessed(args as any);
+          break;
+        case "find_open_shipment_by_customer":
+          result = await findOpenShipmentByCustomer(args as any);
+          break;
+        case "send_email":
+          result = await sendEmail(args as any);
+          break;
+        case "add_chat_message":
+          result = await addChatMessage(args as any);
+          break;
+        case "get_chat_history":
+          result = await getChatHistory(args as any);
+          break;
+        default:
+          throw new Error(`Unknown tool: ${name}`);
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  });
+
+  return serverInstance;
+}
+
+async function handleMcpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+  if (sessionId) {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      res.statusCode = 404;
+      res.end('Session not found');
+      return;
+    }
+    return await session.transport.handleRequest(req, res);
+  }
+
+  if (req.method === 'POST') {
+    await createNewSession(req, res);
+    return;
+  }
+
+  res.statusCode = 400;
+  res.end('Invalid request');
+}
+
+async function createNewSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const serverInstance = createServerInstance();
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: (sessionId) => {
+      sessions.set(sessionId, { transport, server: serverInstance });
+      console.log('New Wilson session created:', sessionId);
+    }
+  });
+
+  transport.onclose = () => {
+    if (transport.sessionId) {
+      sessions.delete(transport.sessionId);
+      console.log('Wilson session closed:', transport.sessionId);
+    }
+  };
 
   try {
-    let result;
-
-    // Route to appropriate tool handler
-    switch (name) {
-      case "create_shipment":
-        result = await createShipment(args as any);
-        break;
-      case "get_shipment":
-        result = await getShipment((args as any).shipment_id);
-        break;
-      case "update_shipment":
-        result = await updateShipment(args as any);
-        break;
-      case "list_shipments":
-        result = await listShipments((args as any) || {});
-        break;
-      case "add_quote":
-        result = await addQuote(args as any);
-        break;
-      case "get_quotes":
-        result = await getQuotes((args as any).shipment_id);
-        break;
-      case "select_quote":
-        result = await selectQuote(args as any);
-        break;
-      case "add_email":
-        result = await addEmail(args as any);
-        break;
-      case "get_emails":
-        result = await getEmails(args as any);
-        break;
-      case "get_unprocessed_emails":
-        result = await getUnprocessedEmails((args as any) || {});
-        break;
-      case "mark_email_processed":
-        result = await markEmailProcessed(args as any);
-        break;
-      case "find_open_shipment_by_customer":
-        result = await findOpenShipmentByCustomer(args as any);
-        break;
-      case "send_email":
-        result = await sendEmail(args as any);
-        break;
-      case "add_chat_message":
-        result = await addChatMessage(args as any);
-        break;
-      case "get_chat_history":
-        result = await getChatHistory(args as any);
-        break;
-      default:
-        throw new Error(`Unknown tool: ${name}`);
-    }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(result, null, 2),
-        },
-      ],
-    };
-  } catch (error: any) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Error: ${error.message}`,
-        },
-      ],
-      isError: true,
-    };
+    await serverInstance.connect(transport);
+    await transport.handleRequest(req, res);
+  } catch (error) {
+    console.error('Streamable HTTP connection error:', error);
+    res.statusCode = 500;
+    res.end('Internal server error');
   }
-});
+}
 
-// HTTP Transport Setup
-const app = express();
-app.use(express.json());
+async function handleSSERequest(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const serverInstance = createServerInstance();
+  const transport = new SSEServerTransport('/sse', res);
 
-const PORT = process.env.PORT || 8080;
+  try {
+    await serverInstance.connect(transport);
+    console.log('SSE connection established');
+  } catch (error) {
+    console.error('SSE connection error:', error);
+    res.statusCode = 500;
+    res.end('SSE connection failed');
+  }
+}
 
-// Health check endpoint
-app.get('/health', (req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
+function handleHealthCheck(res: ServerResponse): void {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
     service: 'wilson-jr-mcp-server',
     version: '1.0.0',
-    tools: tools.length,
+    tools: tools.length
+  }));
+}
+
+function startHttpTransport(): void {
+  const httpServer = createServer();
+
+  httpServer.on('request', async (req, res) => {
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+
+    switch (url.pathname) {
+      case '/mcp':
+        await handleMcpRequest(req, res);
+        break;
+      case '/sse':
+        await handleSSERequest(req, res);
+        break;
+      case '/health':
+        handleHealthCheck(res);
+        break;
+      default:
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not Found');
+    }
   });
-});
 
-// MCP endpoint for session-based requests
-app.post('/mcp', async (req: Request, res: Response) => {
-  try {
-    const request = req.body;
-    res.json({
-      jsonrpc: '2.0',
-      id: request.id,
-      result: { ok: true },
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      jsonrpc: '2.0',
-      id: req.body?.id,
-      error: {
-        code: -32603,
-        message: error.message,
-      },
-    });
-  }
-});
+  const host = '0.0.0.0';
 
-// SSE endpoint
-app.get('/sse', (req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.write('data: {"type":"connected"}\n\n');
-
-  const keepAlive = setInterval(() => {
-    res.write(':\n\n');
-  }, 30000);
-
-  req.on('close', () => {
-    clearInterval(keepAlive);
+  httpServer.listen(PORT, host, () => {
+    console.log(`Wilson Jr MCP Server listening on port ${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/health`);
+    console.log(`MCP endpoint: http://localhost:${PORT}/mcp`);
+    console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
+    console.log(`Tools: ${tools.length}`);
   });
-});
+}
 
 // Start server
 async function main() {
   const args = process.argv.slice(2);
 
   if (args.includes('--stdio')) {
+    const serverInstance = createServerInstance();
     const transport = new StdioServerTransport();
-    await server.connect(transport);
+    await serverInstance.connect(transport);
     console.error('MCP server running on stdio');
   } else {
-    app.listen(PORT, () => {
-      console.log(`Wilson Jr MCP Server running on port ${PORT}`);
-      console.log(`Health: http://localhost:${PORT}/health`);
-      console.log(`Tools: ${tools.length}`);
-    });
+    startHttpTransport();
   }
 }
 
