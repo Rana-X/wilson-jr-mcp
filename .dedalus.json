@@ -1,0 +1,14 @@
+{
+  "runtime": "node",
+  "packageManager": "npm",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "startCommand": "node dist/index.js",
+  "outputDirectory": "dist",
+  "entryFile": "dist/index.js",
+  "port": 8080,
+  "healthCheck": {
+    "path": "/health",
+    "interval": 30
+  }
+}
